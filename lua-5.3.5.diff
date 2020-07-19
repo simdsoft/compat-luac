@@ -1,0 +1,146 @@
+diff --git a/src/ldump.c b/src/ldump.c
+index f025acac3c2327d6f2b68df4d79a1536fa3faaa2..90ab3ee78b614a2efe507a0e05fb6288750232f7 100644
+--- a/src/ldump.c
++++ b/src/ldump.c
+@@ -74,7 +74,7 @@ static void DumpString (const TString *s, DumpState *D) {
+   if (s == NULL)
+     DumpByte(0, D);
+   else {
+-    size_t size = tsslen(s) + 1;  /* include trailing '\0' */
++    LBC_SIZE_T size = tsslen(s) + 1;  /* include trailing '\0' */
+     const char *str = getstr(s);
+     if (size < 0xFF)
+       DumpByte(cast_int(size), D);
+@@ -186,8 +186,10 @@ static void DumpHeader (DumpState *D) {
+   DumpByte(LUAC_VERSION, D);
+   DumpByte(LUAC_FORMAT, D);
+   DumpLiteral(LUAC_DATA, D);
++#if  LUAC_COMPAT_32BIT
+   DumpByte(sizeof(int), D);
+-  DumpByte(sizeof(size_t), D);
++  DumpByte(sizeof(LBC_SIZE_T), D);
++#endif
+   DumpByte(sizeof(Instruction), D);
+   DumpByte(sizeof(lua_Integer), D);
+   DumpByte(sizeof(lua_Number), D);
+diff --git a/src/loslib.c b/src/loslib.c
+index de590c6b717a627a1fc0f014d1e1b80dda3723f8..8e62e13613199877a61b5a1e94709727e12021c2 100644
+--- a/src/loslib.c
++++ b/src/loslib.c
+@@ -139,6 +139,7 @@ static time_t l_checktime (lua_State *L, int arg) {
+ 
+ 
+ static int os_execute (lua_State *L) {
++#if defined(_WIN32)
+   const char *cmd = luaL_optstring(L, 1, NULL);
+   int stat = system(cmd);
+   if (cmd != NULL)
+@@ -147,6 +148,9 @@ static int os_execute (lua_State *L) {
+     lua_pushboolean(L, stat);  /* true if there is a shell */
+     return 1;
+   }
++#else
++  return luaL_error(L, "unsupport api in embedded platforms!");
++#endif
+ }
+ 
+ 
+diff --git a/src/lua.h b/src/lua.h
+index c236e360957949816ff78973f8695300b2a63b96..ae117ee3e287223c1276fa8231f00a4b998e93c6 100644
+--- a/src/lua.h
++++ b/src/lua.h
+@@ -11,7 +11,7 @@
+ 
+ #include <stdarg.h>
+ #include <stddef.h>
+-
++#include <stdint.h>
+ 
+ #include "luaconf.h"
+ 
+@@ -98,6 +98,12 @@ typedef LUA_UNSIGNED lua_Unsigned;
+ /* type for continuation-function contexts */
+ typedef LUA_KCONTEXT lua_KContext;
+ 
++/* type of 64bit VM can load 32 bit byte code */
++#if defined(LUAC_COMPAT_FORMAT) || defined(LUAC_COMPAT_FORMAT)
++#define LBC_SIZE_T uint32_t
++#else
++#define LBC_SIZE_T size_t
++#endif
+ 
+ /*
+ ** Type for C functions registered with Lua
+diff --git a/src/luaconf.h b/src/luaconf.h
+index 9eeeea69e205526f8ed81d8116a4bf02e3786f51..ecb5832043248e6721d79a82092df5c04f7367f4 100644
+--- a/src/luaconf.h
++++ b/src/luaconf.h
+@@ -676,7 +676,9 @@
+ ** Change that if you do not want to use C locales. (Code using this
+ ** macro must include header 'locale.h'.)
+ */
+-#if !defined(lua_getlocaledecpoint)
++#ifdef __ANDROID__
++#define lua_getlocaledecpoint() '.'
++#elif !defined(lua_getlocaledecpoint)
+ #define lua_getlocaledecpoint()		(localeconv()->decimal_point[0])
+ #endif
+ 
+@@ -783,7 +785,15 @@
+ */
+ 
+ 
++/* New compatible byte code support, do things better, not brainless port
++ a. little changed
++ b. inspired from tecent xlua lua-5.3.5
++ c. no side effect, abi compatible, not need modify 3rds lua libraries
++ */
++// #define LUAC_COMPAT_FORMAT 1
+ 
++/* whether compatible with official x86 lua */
++// #define LUAC_COMPAT_32BIT 1
+ 
+ 
+ #endif
+diff --git a/src/lundump.c b/src/lundump.c
+index 7a67d75aaa04ccfac37094115f1e630b8cf15cc3..2d6df7ef0fc6ced6131f6fd1b6364146bbfa06e5 100644
+--- a/src/lundump.c
++++ b/src/lundump.c
+@@ -86,7 +86,8 @@ static lua_Integer LoadInteger (LoadState *S) {
+ 
+ 
+ static TString *LoadString (LoadState *S) {
+-  size_t size = LoadByte(S);
++  LBC_SIZE_T size = LoadByte(S);
++
+   if (size == 0xFF)
+     LoadVar(S, size);
+   if (size == 0)
+@@ -240,8 +241,10 @@ static void checkHeader (LoadState *S) {
+   if (LoadByte(S) != LUAC_FORMAT)
+     error(S, "format mismatch in");
+   checkliteral(S, LUAC_DATA, "corrupted");
++#if LUAC_COMPAT_32BIT
+   checksize(S, int);
+-  checksize(S, size_t);
++  checksize(S, LBC_SIZE_T);
++#endif
+   checksize(S, Instruction);
+   checksize(S, lua_Integer);
+   checksize(S, lua_Number);
+diff --git a/src/lundump.h b/src/lundump.h
+index ce492d689cd1e22e14d9150be1f0f0624f00c9c6..d3ea7dedc4a862719dc3416122ce2c0e03c535c8 100644
+--- a/src/lundump.h
++++ b/src/lundump.h
+@@ -20,7 +20,11 @@
+ 
+ #define MYINT(s)	(s[0]-'0')
+ #define LUAC_VERSION	(MYINT(LUA_VERSION_MAJOR)*16+MYINT(LUA_VERSION_MINOR))
++#if LUAC_COMPAT_FORMAT
++#define LUAC_FORMAT 1
++#else
+ #define LUAC_FORMAT	0	/* this is the official format */
++#endif
+ 
+ /* load one chunk; from lundump.c */
+ LUAI_FUNC LClosure* luaU_undump (lua_State* L, ZIO* Z, const char* name);
