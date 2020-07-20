@@ -1,7 +1,8 @@
 # luac
 
 ## Purpose
-Make lua5.1~5.3 byte code compatible with x86, x64
+1. Make lua5.1~5.3 byte code compatible with x86, x64
+2. Embedded system compatible: Android/iOS
 
 ## CMakeLists.txt
 1. Download lua package from https://www.lua.org/versions.html
