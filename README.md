@@ -8,7 +8,7 @@
 1. Download lua package from https://www.lua.org/versions.html
 2. Uncompress lua-5.x.x.tar.gz
 3. Copy CMakeLists.txt to root of lua-5.x.x
-4. cmake -B build . -DLUA_VER=<lua5x>, please specify LUA_VER for project name, such as lua54.
+4. Generate project: ```cmake -Bbuild . -DLUA_VER=<lua5x>```, please specify LUA_VER for project name, such as lua54.
 
 
 ## Notes
